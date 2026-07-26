@@ -1680,6 +1680,19 @@ the content with `org-escape-code-in-string'."
             (insert "#+begin_src " lang "\n" (org-escape-code-in-string content) "#+end_src")))))
     (buffer-string)))
 
+(defun macher--action-source-name (execution)
+  "Return the source buffer's name for EXECUTION, or nil.
+
+NAME is the base filename of the source buffer's file, or the buffer
+name for non-file buffers.  Returns nil if the source buffer is not
+set or no longer live."
+  (when-let* ((source (macher-action-execution-source execution))
+              ((buffer-live-p source)))
+    (with-current-buffer source
+      (if buffer-file-name
+          (file-name-nondirectory buffer-file-name)
+        (buffer-name)))))
+
 (defun macher--before-action-insert-prompt (execution)
   "Insert the action prompt into the current buffer.
 
@@ -1711,7 +1724,11 @@ This is added buffer-locally to `macher-before-action-functions' by
       ;; Add another newline if we're not at the beginning of the buffer, for visual clarity.
       (unless (bobp)
         (insert "\n"))
-      (let* ((header-prefix "* ")
+      (let* ((name (macher--action-source-name execution))
+             (header-prefix
+              (if name
+                  (format "* %s: " name)
+                "* "))
              (header-postfix (format " :%s:" action))
              (summary (macher-action-execution-summary execution))
              ;; Extract the first non-whitespace line from the summary and truncate to fill-column.

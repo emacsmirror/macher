@@ -5093,6 +5093,20 @@
               (expect content :to-match "^### Test prompt$"))))))
 
     (describe "text properties"
+      :var (source)
+
+      (before-each
+        (setq source (generate-new-buffer "*test-source*"))
+        (with-current-buffer source
+          (insert "line one\nline two\n")
+          (setq buffer-file-name "/some/dir/source.el")
+          (set-buffer-modified-p nil)
+          (goto-char (point-min))))
+
+      (after-each
+        (when (buffer-live-p source)
+          (kill-buffer source)))
+
       (it "sets gptel 'ignore property on the header line"
         (with-temp-buffer
           (org-mode)
@@ -5103,7 +5117,8 @@
                   :action 'test
                   :prompt "Test prompt"
                   :summary "Test prompt"
-                  :buffer (current-buffer))))
+                  :buffer (current-buffer)
+                  :source source)))
             (macher--before-action-insert-prompt execution)
             ;; Find the header line and check its text property.
             (goto-char (point-min))
@@ -5123,7 +5138,8 @@
                   :action 'test
                   :prompt "Test prompt content"
                   :summary "Test prompt"
-                  :buffer (current-buffer))))
+                  :buffer (current-buffer)
+                  :source source)))
             (macher--before-action-insert-prompt execution)
             ;; Find where the prompt starts (after header and prefix).
             (goto-char (point-min))
@@ -5142,7 +5158,8 @@
                   :action 'test
                   :prompt "User message content"
                   :summary "Summary"
-                  :buffer (current-buffer))))
+                  :buffer (current-buffer)
+                  :source source)))
             (macher--before-action-insert-prompt execution)
             ;; Now parse the buffer as gptel would.
             (goto-char (point-max))
@@ -5164,6 +5181,20 @@
                       :to-be nil))))))
 
     (describe "org mode behavior"
+      :var (source)
+
+      (before-each
+        (setq source (generate-new-buffer "*test-source*"))
+        (with-current-buffer source
+          (insert "line one\nline two\n")
+          (setq buffer-file-name "/some/dir/source.el")
+          (set-buffer-modified-p nil)
+          (goto-char (point-min))))
+
+      (after-each
+        (when (buffer-live-p source)
+          (kill-buffer source)))
+
       (it "folds source blocks after insertion"
         (with-temp-buffer
           (org-mode)
@@ -5174,7 +5205,8 @@
                   :action 'test
                   :prompt "Check this code:\n```python\nprint(\"hello world\")\n```"
                   :summary "Test prompt"
-                  :buffer (current-buffer))))
+                  :buffer (current-buffer)
+                  :source source)))
             (macher--before-action-insert-prompt execution)
             ;; Find the src block content line.
             (goto-char (point-min))
@@ -5196,7 +5228,8 @@
                  :action 'test
                  :prompt "Here is an example:\n#+begin_example\nsome example content\n#+end_example"
                  :summary "Test prompt"
-                 :buffer (current-buffer))))
+                 :buffer (current-buffer)
+                 :source source)))
             (macher--before-action-insert-prompt execution)
             ;; Find the example block content line.
             (goto-char (point-min))
@@ -5215,7 +5248,8 @@
                   :action 'discuss
                   :prompt "Test prompt for topic"
                   :summary "Test prompt for topic setting"
-                  :buffer (current-buffer))))
+                  :buffer (current-buffer)
+                  :source source)))
             (macher--before-action-insert-prompt execution)
             ;; The buffer should have a GPTEL_TOPIC property set.
             (let ((content (buffer-substring-no-properties (point-min) (point-max))))
@@ -5224,7 +5258,71 @@
               ;; Check that the topic follows the expected format.
               (expect
                content
-               :to-match ":GPTEL_TOPIC: macher-discuss-[0-9]\\{14\\}-test-prompt-for-topic-setting")))))))
+               :to-match ":GPTEL_TOPIC: macher-discuss-[0-9]\\{14\\}-test-prompt-for-topic-setting")))))
+
+      (it "renders the heading without a name when source is not set"
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'test
+                  :prompt "Test prompt"
+                  :summary "Test prompt"
+                  :buffer (current-buffer))))
+            (macher--before-action-insert-prompt execution)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              (expect content :to-match "^\\* Test prompt :test:$")
+              (expect content :not :to-match "source\\.el")))))
+
+      (it "includes the source name in the topic heading"
+        (with-temp-buffer
+          (org-mode)
+          (gptel-mode 1)
+          (setq-local gptel-prompt-prefix-alist '((org-mode . "*** ")))
+          (let ((execution
+                 (macher--make-action-execution
+                  :action 'implement
+                  :prompt "Test prompt"
+                  :summary "Do the thing"
+                  :buffer (current-buffer)
+                  :source source)))
+            (macher--before-action-insert-prompt execution)
+            (let ((content (buffer-substring-no-properties (point-min) (point-max))))
+              ;; The source name is rendered in the heading before the summary.
+              (expect content :to-match "^\\* source\\.el: Do the thing :implement:$")))))))
+
+  (describe "macher--action-source-name"
+    (it "returns nil when the execution has no source buffer"
+      (let ((execution (macher--make-action-execution :action 'test)))
+        (expect (macher--action-source-name execution) :to-be nil)))
+
+    (it "returns nil when the source buffer has been killed"
+      (let ((buf (generate-new-buffer "*test-dead-source*")))
+        (kill-buffer buf)
+        (let ((execution (macher--make-action-execution :action 'test :source buf)))
+          (expect (macher--action-source-name execution) :to-be nil))))
+
+    (it "uses the base filename for file buffers"
+      (with-temp-buffer
+        (insert "line one\nline two\nline three\n")
+        (setq buffer-file-name "/some/dir/test.js")
+        (set-buffer-modified-p nil)
+        (goto-char (point-min))
+        (forward-line 1)
+        (let ((execution (macher--make-action-execution :action 'test :source (current-buffer))))
+          (expect (macher--action-source-name execution) :to-equal "test.js"))))
+
+    (it "uses the buffer name for non-file buffers"
+      (let ((buf (generate-new-buffer "*test-source-name*")))
+        (unwind-protect
+            (with-current-buffer buf
+              (insert "hello\nworld\n")
+              (goto-char (point-min))
+              (let ((execution (macher--make-action-execution :action 'test :source buf)))
+                (expect (macher--action-source-name execution) :to-equal "*test-source-name*")))
+          (kill-buffer buf)))))
 
 
   (describe "macher--before-action-scroll"
